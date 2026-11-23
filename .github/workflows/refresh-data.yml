@@ -1,0 +1,37 @@
+name: Refresh Cambridge 311 data
+
+on:
+  schedule:
+    # Daily at 11:00 UTC (~6:00 AM ET / 7:00 AM EDT)
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild 311 dataset and GIS spatial joins
+        run: python scripts/build_data.py
+
+      - name: Commit updated data snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet data/tickets.bin data/meta.json data/regions.json; then
+            echo "No data changes."
+            exit 0
+          fi
+          git add data/tickets.bin data/meta.json data/regions.json
+          git commit -m "chore(data): refresh Cambridge 311 snapshot"
+          git push

@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cambridge 311 Explorer — Commonwealth Connect Service Requests</title>
+  <meta name="description" content="Interactive explorer for City of Cambridge 311 (Commonwealth Connect) service requests with live maps, regional density choropleths, filterable charts, and animated timeline playback.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231D2F8D'/%3E%3Crect y='26' width='32' height='6' fill='%2300A9FF'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='sans-serif' font-weight='700' font-size='14' fill='%23FFFFFF'%3E311%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <link rel="stylesheet" href="css/cambridge.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="coc">
+  <!-- Loading overlay -->
+  <div id="loading-overlay" class="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-card">
+      <img src="assets/logo-white.svg" alt="City of Cambridge" class="loading-logo">
+      <div class="loading-title">Cambridge 311 Explorer</div>
+      <div id="loading-status" class="loading-status">Loading service requests and city boundaries…</div>
+      <div class="loading-bar-track">
+        <div id="loading-bar-fill" class="loading-bar-fill" style="width: 15%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Brand Header (Dark Blue touching edges + 6px Bright Blue rule, 1 logo only) -->
+  <header class="app-header">
+    <div class="header-left">
+      <a href="https://www.cambridgema.gov" target="_blank" rel="noopener" class="brand-link" aria-label="City of Cambridge homepage">
+        <img src="assets/logo-white.svg" alt="City of Cambridge" class="header-logo">
+      </a>
+      <div class="header-divider" aria-hidden="true"></div>
+      <div class="header-titles">
+        <h1>Cambridge 311 Explorer</h1>
+        <p class="header-sub">Commonwealth Connect service requests · Open Data <a href="https://data.cambridgema.gov/Public-Works/Commonwealth-Connect-Service-Requests/2z9k-mv9g/about_data" target="_blank" rel="noopener">2z9k-mv9g</a></p>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="freshness-badge" class="freshness-badge" title="Dataset freshness">Loading…</span>
+      <button id="btn-share" class="hdr-btn" type="button" title="Copy shareable link to current filters and time window">Share view</button>
+      <button id="btn-about" class="hdr-btn hdr-btn--ghost" type="button">About &amp; data</button>
+    </div>
+  </header>
+
+  <!-- Filter Bar -->
+  <section class="filter-bar" aria-label="Filters">
+    <div class="filter-row">
+      <!-- Theme Filter -->
+      <div class="filter-group">
+        <label for="filter-theme" class="filter-label">Topic</label>
+        <select id="filter-theme" class="filter-select">
+          <option value="all">All topics</option>
+        </select>
+      </div>
+
+      <!-- Category Searchable Multi-Select -->
+      <div class="filter-group filter-group--category">
+        <span class="filter-label" id="cat-dropdown-label">Issue category</span>
+        <div class="multi-select" id="category-dropdown">
+          <button type="button" id="cat-dropdown-btn" class="filter-select multi-select__btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="cat-dropdown-label cat-dropdown-btn">
+            <span id="cat-dropdown-text">All categories</span>
+            <span class="caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="cat-dropdown-menu" class="multi-select__menu" hidden>
+            <div class="multi-select__search-wrap">
+              <input type="search" id="cat-search-input" class="multi-select__search" placeholder="Filter categories…" autocomplete="off">
+              <button type="button" id="cat-clear-btn" class="text-btn">Clear</button>
+            </div>
+            <div id="cat-options-list" class="multi-select__list" role="listbox" aria-multiselectable="true"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Segmented Control -->
+      <div class="filter-group">
+        <span class="filter-label">Status</span>
+        <div class="seg-group" id="filter-status" role="group" aria-label="Ticket status">
+          <button type="button" class="seg-btn active" data-status="all">All</button>
+          <button type="button" class="seg-btn" data-status="active">Open / Ack</button>
+          <button type="button" class="seg-btn" data-status="open">Open</button>
+          <button type="button" class="seg-btn" data-status="closed">Closed</button>
+        </div>
+      </div>
+
+      <!-- Region Filter Dropdown (synced with map region layer) -->
+      <div class="filter-group">
+        <label for="filter-region" class="filter-label" id="filter-region-label">Neighborhood</label>
+        <select id="filter-region" class="filter-select">
+          <option value="all">All Cambridge</option>
+        </select>
+      </div>
+
+      <!-- Keyword Search -->
+      <div class="filter-group filter-group--search">
+        <label for="filter-keyword" class="filter-label">Keyword search</label>
+        <div class="search-box">
+          <input type="search" id="filter-keyword" class="filter-input" placeholder="Search descriptions or addresses…" autocomplete="off">
+          <button type="button" id="btn-keyword-go" class="search-go-btn" title="Search descriptions via Cambridge Open Data">Search</button>
+          <button type="button" id="btn-keyword-clear" class="search-clear-btn" title="Clear keyword search" hidden>×</button>
+        </div>
+      </div>
+
+      <!-- Photo filter + Reset -->
+      <div class="filter-group filter-group--actions">
+        <label class="checkbox-pill" title="Show only requests submitted with a photo">
+          <input type="checkbox" id="filter-photo">
+          <span>Has photo</span>
+        </label>
+        <button type="button" id="btn-reset-filters" class="reset-btn" hidden>Reset all</button>
+      </div>
+    </div>
+
+    <!-- Quick Presets & Active Filter Chips -->
+    <div class="presets-row">
+      <div class="presets-left">
+        <span class="presets-label">Quick views:</span>
+        <button type="button" class="preset-chip" data-preset="recent90">Last 90 days</button>
+        <button type="button" class="preset-chip" data-preset="open-now">Currently open</button>
+        <button type="button" class="preset-chip" data-preset="winter">Snow &amp; ice seasons</button>
+        <button type="button" class="preset-chip" data-preset="bikes">Bike lane reports</button>
+        <button type="button" class="preset-chip" data-preset="rodents">Rodent sightings</button>
+        <button type="button" class="preset-chip" data-preset="potholes">Potholes</button>
+      </div>
+      <div id="active-chips" class="active-chips" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- KPI Summary Strip -->
+  <section class="kpi-strip" aria-label="Summary metrics for selected time window">
+    <div class="kpi-card">
+      <div class="kpi-label">Requests in window</div>
+      <div class="kpi-value coc-display" id="kpi-total">—</div>
+      <div class="kpi-sub" id="kpi-total-sub">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Open or acknowledged</div>
+      <div class="kpi-value coc-display" id="kpi-active">—</div>
+      <div class="kpi-sub" id="kpi-active-sub">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Median resolution time</div>
+      <div class="kpi-value coc-display" id="kpi-median">—</div>
+      <div class="kpi-sub" id="kpi-median-sub">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Top category in view</div>
+      <div class="kpi-value kpi-value--text" id="kpi-top-cat">—</div>
+      <div class="kpi-sub" id="kpi-top-cat-sub">—</div>
+    </div>
+  </section>
+
+  <!-- Main Workspace: Map + Live Charts -->
+  <main class="workspace">
+    <!-- Left Column: Interactive Map -->
+    <section class="panel map-panel" aria-label="Interactive map">
+      <div class="panel-head">
+        <div class="map-controls-primary">
+          <div class="seg-group" id="map-mode-toggle" role="group" aria-label="Map display mode">
+            <button type="button" class="seg-btn active" data-mode="choropleth">Region density</button>
+            <button type="button" class="seg-btn" data-mode="points">Individual complaints</button>
+          </div>
+          <div id="choropleth-controls" class="inline-controls">
+            <select id="region-layer-select" class="mini-select" aria-label="Geographic boundary layer">
+              <option value="neighborhoods">Neighborhoods (13)</option>
+              <option value="tracts">2020 Census tracts (33)</option>
+              <option value="wards_precincts">Wards &amp; precincts (33)</option>
+              <option value="zipcodes">ZIP codes (5)</option>
+            </select>
+            <select id="density-metric-select" class="mini-select" aria-label="Choropleth metric">
+              <option value="density">Per sq mi</option>
+              <option value="count">Total requests</option>
+              <option value="per_capita">Per 1,000 residents</option>
+            </select>
+            <label class="mini-check" title="Keep color scale fixed across frames when animating timeline">
+              <input type="checkbox" id="lock-scale-toggle">
+              <span>Lock scale</span>
+            </label>
+          </div>
+          <div id="points-controls" class="inline-controls" hidden>
+            <select id="point-color-select" class="mini-select" aria-label="Color individual points by">
+              <option value="theme">Color by topic</option>
+              <option value="status">Color by status</option>
+            </select>
+            <span id="points-count-note" class="points-note"></span>
+          </div>
+        </div>
+        <button type="button" id="btn-map-reset" class="mini-btn" title="Reset map zoom to Cambridge">Reset view</button>
+      </div>
+
+      <div class="map-stage">
+        <div id="map" class="leaflet-host" aria-label="Map of Cambridge 311 service requests"></div>
+
+        <!-- Hover Callout Card -->
+        <div id="map-hover-card" class="map-hover-card" hidden></div>
+
+        <!-- Legend Overlay -->
+        <div id="map-legend" class="map-legend" aria-label="Map legend"></div>
+
+        <!-- Playing Status Pill on Map -->
+        <div id="map-play-badge" class="map-play-badge" hidden>
+          <span class="play-dot" aria-hidden="true"></span>
+          <span id="map-play-label">Playing…</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Live Charts -->
+    <aside class="charts-column" aria-label="Live charts">
+      <!-- Chart 1: Top Issue Categories -->
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <h2>Top issue categories</h2>
+          <span class="panel-hint">Click a bar to filter</span>
+        </div>
+        <div id="chart-categories" class="bar-chart"></div>
+      </section>
+
+      <!-- Chart 2: Geographic Breakdown -->
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <h2 id="chart-regions-title">Neighborhood density</h2>
+          <span class="panel-hint" id="chart-regions-hint">Requests per sq mi · Click to filter</span>
+        </div>
+        <div id="chart-regions" class="bar-chart"></div>
+      </section>
+
+      <!-- Chart 3: Patterns, Resolution, & Recent Tickets (Tabbed to stay uncluttered) -->
+      <section class="panel chart-panel chart-panel--tabs">
+        <div class="panel-head panel-head--tabs">
+          <div class="tab-group" id="detail-tabs" role="tablist" aria-label="Additional breakdowns">
+            <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-tab="patterns">Time patterns</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="resolution">Resolution speed</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tickets">Tickets in view</button>
+          </div>
+          <span class="panel-hint" id="detail-tab-hint">Day of week &amp; hour</span>
+        </div>
+        <div id="tab-patterns" class="tab-pane active">
+          <div class="patterns-grid">
+            <div>
+              <h3 class="mini-head">By day of week</h3>
+              <div id="chart-dow" class="mini-vbar-chart"></div>
+            </div>
+            <div>
+              <h3 class="mini-head">By hour of day</h3>
+              <div id="chart-hour" class="mini-vbar-chart mini-vbar-chart--dense"></div>
+            </div>
+          </div>
+        </div>
+        <div id="tab-resolution" class="tab-pane" hidden>
+          <div id="chart-resolution" class="bar-chart"></div>
+        </div>
+        <div id="tab-tickets" class="tab-pane" hidden>
+          <div class="tickets-list-note">Showing latest matching tickets in the active window. Click any ticket to inspect details &amp; photo.</div>
+          <div id="recent-tickets-list" class="tickets-list"></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <!-- Docked Interactive Timeline & Playback Bar -->
+  <section class="timeline-dock" aria-label="Timeline filter and playback animation">
+    <div class="timeline-toolbar">
+      <div class="playback-controls">
+        <button type="button" id="btn-step-back" class="ctrl-btn" title="Step window backward (Left arrow)" aria-label="Step backward">◂</button>
+        <button type="button" id="btn-play" class="ctrl-btn ctrl-btn--play" title="Play or pause timeline animation (Spacebar)" aria-label="Play timeline animation">
+          <span id="play-icon" aria-hidden="true">▶</span>
+          <span id="play-text">Play</span>
+        </button>
+        <button type="button" id="btn-step-fwd" class="ctrl-btn" title="Step window forward (Right arrow)" aria-label="Step forward">▸</button>
+        <label class="mini-check loop-check" title="Loop back to start when animation reaches end">
+          <input type="checkbox" id="toggle-loop" checked>
+          <span>Loop</span>
+        </label>
+        <div class="speed-wrap">
+          <label for="play-speed" class="sr-only">Animation speed</label>
+          <select id="play-speed" class="mini-select" title="Playback speed">
+            <option value="0.5">0.5× speed</option>
+            <option value="1" selected>1× speed</option>
+            <option value="2">2× speed</option>
+            <option value="4">4× speed</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="window-readout">
+        <span id="window-date-range" class="window-dates">—</span>
+        <span id="window-span-badge" class="window-span">—</span>
+      </div>
+
+      <div class="timeline-presets">
+        <div class="window-size-group" role="group" aria-label="Time window size">
+          <span class="presets-label">Window:</span>
+          <button type="button" class="win-btn" data-win="7">1W</button>
+          <button type="button" class="win-btn" data-win="30">1M</button>
+          <button type="button" class="win-btn" data-win="90">3M</button>
+          <button type="button" class="win-btn" data-win="180">6M</button>
+          <button type="button" class="win-btn active" data-win="365">1Y</button>
+          <button type="button" class="win-btn" data-win="all">Full</button>
+        </div>
+        <div class="horizon-wrap">
+          <label for="horizon-select" class="presets-label">Timeline:</label>
+          <select id="horizon-select" class="mini-select">
+            <option value="modern" selected>2016–Present</option>
+            <option value="3y">Last 3 years</option>
+            <option value="1y">Last 12 months</option>
+            <option value="all">All (2009–Present)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="timeline-canvas-wrap" class="timeline-chart-wrap" title="Drag handles to resize window, drag inside to scrub, or drag anywhere to select a new period">
+      <svg id="timeline-svg" class="timeline-svg" role="img" aria-label="Interactive service request timeline. Drag to select a time period."></svg>
+      <div id="timeline-tooltip" class="timeline-tooltip" hidden></div>
+    </div>
+  </section>
+
+  <!-- Ticket Inspector Slide-Over Drawer -->
+  <aside id="ticket-drawer" class="ticket-drawer" aria-label="Service request details" hidden>
+    <div class="drawer-head">
+      <div>
+        <div id="drawer-theme-tag" class="drawer-theme-tag">Topic</div>
+        <h2 id="drawer-title">Ticket details</h2>
+      </div>
+      <button type="button" id="drawer-close" class="drawer-close" aria-label="Close ticket details">×</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+
+  <!-- About & Data Modal -->
+  <div id="about-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="about-modal-title">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="about-modal-title">About Cambridge 311 Explorer</h2>
+        <button type="button" id="about-close" class="drawer-close" aria-label="Close modal">×</button>
+      </div>
+      <div class="modal-body">
+        <p>This interactive explorer visualizes non-emergency service requests submitted through Cambridge's <strong>Commonwealth Connect</strong> (SeeClickFix Open311) system.</p>
+        <h3>Data sources &amp; freshness</h3>
+        <ul>
+          <li><strong>Service requests:</strong> <a href="https://data.cambridgema.gov/Public-Works/Commonwealth-Connect-Service-Requests/2z9k-mv9g/about_data" target="_blank" rel="noopener">Commonwealth Connect Service Requests (2z9k-mv9g)</a> on Cambridge Open Data. The snapshot refreshes nightly via GitHub Actions and automatically fetches newly submitted requests live on page load.</li>
+          <li><strong>Geographic boundaries:</strong> Official City of Cambridge GIS layers (<a href="https://github.com/cambridgegis/cambridgegis_data" target="_blank" rel="noopener">cambridgegis_data</a>) for CDD Neighborhoods, 2020 Census Tracts, Election Wards &amp; Precincts, and ZIP Codes.</li>
+          <li><strong>Population figures:</strong> 2020 Decennial Census counts from Cambridge Open Data (<code>rqau-pwa4</code>) and Cambridge GIS Election Wards &amp; Precincts.</li>
+        </ul>
+        <h3>Tips for exploring</h3>
+        <ul>
+          <li><strong>Brush the timeline:</strong> Drag the left/right edges to resize your date window, drag the middle to scrub through time, or click and drag anywhere on the chart to pick a custom period.</li>
+          <li><strong>Animate over time:</strong> Pick a window size (like <code>1M</code> or <code>3M</code>), turn on <em>Lock scale</em> in Region Density mode, and press <strong>Play</strong> (or <code>Spacebar</code>) to watch seasonal patterns move across Cambridge.</li>
+          <li><strong>Cross-filter anywhere:</strong> Click any neighborhood/tract on the map or any bar in the charts to filter every view simultaneously.</li>
+          <li><strong>Inspect individual complaints:</strong> Switch to <em>Individual complaints</em> and click any dot to read the full resident description, see submitted photos, and open the ticket on SeeClickFix.</li>
+        </ul>
+        <div class="modal-meta" id="about-build-meta"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
